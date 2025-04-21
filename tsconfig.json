@@ -16,9 +16,13 @@
       "*": [
         "node_modules/*"
       ]
-    }
+    },
+    "types": [
+      "node"
+    ],
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "types.d.ts"
   ]
 }
