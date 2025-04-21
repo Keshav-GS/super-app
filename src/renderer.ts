@@ -26,7 +26,17 @@
  * ```
  */
 
+// src/renderer.tsx
+import { createRoot } from 'react-dom/client';
+import React from 'react';
+import App from './app';
 import './index.css';
-import './app';
+
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('Failed to find the root element');
+const root = createRoot(rootElement);
+root.render(React.createElement(App));
+
+
 
 console.log('👋 This message is being logged by "renderer.js", included via webpack');
