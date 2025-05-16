@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
+    "typeRoots": [
+      "./types",
+      "./node_modules/@types"
+    ],
     "jsx": "react-jsx",
     "target": "ES6",
     "allowJs": true,
@@ -23,6 +27,7 @@
   },
   "include": [
     "src/**/*",
-    "types.d.ts"
+    "types.d.ts",
+    "types/**/*"
   ]
 }
