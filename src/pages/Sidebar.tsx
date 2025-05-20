@@ -96,19 +96,22 @@ export default function Sidebar() {
                             text="Product Catalog"
                             onClick={() => navigate('/products')}
                         />
-                        <SidebarItem
-                            icon={<InventoryIcon />}
-                            text="Inventory"
-                            onClick={() => navigate('/inventory')}
-                        />
+
 
                         {/* Manager & Admin: Order & Procurement */}
                         {(isManager() || isAdmin()) && (
-                            <SidebarItem
-                                icon={<OrdersIcon />}
-                                text="Order & Procurement"
-                                onClick={() => navigate('/orders')}
-                            />
+                            <>
+                                <SidebarItem
+                                    icon={<OrdersIcon />}
+                                    text="Order & Procurement"
+                                    onClick={() => navigate('/orders')}
+                                />
+                                <SidebarItem
+                                    icon={<InventoryIcon />}
+                                    text="Inventory"
+                                    onClick={() => navigate('/inventory')}
+                                />
+                            </>
                         )}
 
                         {/* Admin only: Analytics */}
