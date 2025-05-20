@@ -54,7 +54,7 @@ const startServerAndWindow = async () => {
       }
     } catch {
       retries--;
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 2500));
     }
   }
   console.error('Failed to start server after retries');
@@ -114,10 +114,10 @@ app.on('activate', () => {
 import { ipcMain } from 'electron';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
-
+const API_BASE = "http://localhost:5000/api";
 ipcMain.handle('login', async (_event, { email, password }) => {
   try {
-    const response = await fetch('http://localhost:5000/api/login', {
+    const response = await fetch(`${API_BASE}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -126,18 +126,23 @@ ipcMain.handle('login', async (_event, { email, password }) => {
       const errorData = await response.json() as { message?: string };
       throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
     }
-    return response.json();
+    const userData: any = await response.json();
+    return {
+      ...userData,
+      lastLogin: new Date().toISOString()
+    };
   } catch (error) {
     throw new Error(error.message || 'Login failed');
   }
 });
+
 ipcMain.handle('get-products', async (_event, search) => {
-  const res = await fetch(`http://localhost:5000/api/products?search=${encodeURIComponent(search)}`);
+  const res = await fetch(`${API_BASE}/products?search=${encodeURIComponent(search)}`);
   return res.json();
 });
 
 ipcMain.handle('add-product', async (_event, product) => {
-  const response = await fetch('http://localhost:5000/api/products', {
+  const response = await fetch(`${API_BASE}/products`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(product)
@@ -145,47 +150,131 @@ ipcMain.handle('add-product', async (_event, product) => {
   return response.json();
 });
 
-ipcMain.handle('upload-products-csv', async (_event, data) => {
-  const response = await fetch('http://localhost:5000/api/products/upload-csv', {
-    method: 'POST',
+ipcMain.handle('updateProduct', async (_event, id, product) => {
+  const res = await fetch(`${API_BASE}/products/${id}`, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ products: data })
+    body: JSON.stringify(product)
   });
-  return response.json();
-});
-
-ipcMain.handle('get-orders', async () => {
-  const res = await fetch("http://localhost:5000/api/orders");
-  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-  return res.json();
-});
-ipcMain.handle('get-inventory', async () => {
-  const res = await fetch("http://localhost:5000/api/inventory");
-  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
   return res.json();
 });
 
-ipcMain.handle('get-inventory-alerts', async () => {
-  const res = await fetch("http://localhost:5000/api/inventory/alerts");
-  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-  const data = await res.json();
-  return data;
-});
+// ipcMain.handle('deleteProduct', async (_event, id) => {
+//   const res = await fetch(`${API_BASE}/products/${id}`, {
+//     method: 'DELETE'
+//   });
+//   return res.json();
+// });
 
-ipcMain.handle('get-inventory-forecast', async () => {
-  const res = await fetch("http://localhost:5000/api/inventory/forecast");
-  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+ipcMain.handle('upload-products-csv', async (_event, fileData) => {
+  const buffer = Buffer.from(fileData.buffer);
+  const form = new FormData();
+  form.append('csvfile', buffer, { filename: fileData.name, contentType: fileData.type || 'text/csv' });
+
+  const res = await fetch(`${API_BASE}/products/upload-csv`, {
+    method: 'POST',
+    body: form,
+    headers: form.getHeaders(),
+  });
   return res.json();
 });
 
+ipcMain.handle("get-orders", async (_event, filters) => {
+  const params = new URLSearchParams(filters).toString();
+  const res = await fetch(`${API_BASE}/orders?${params}`);
+  return res.json();
+});
+
+ipcMain.handle("get-order-details", async (_event, id) => {
+  const res = await fetch(`${API_BASE}/orders/${id}`);
+  return res.json();
+});
+
+ipcMain.handle("save-order", async (_event, orderData) => {
+  const res = await fetch(`${API_BASE}/orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(orderData),
+  });
+  return res.json();
+});
+
+ipcMain.handle("receive-order", async (_event, orderId) => {
+  const res = await fetch(`${API_BASE}/orders/${orderId}/receive`, { method: "POST" });
+  return res.json();
+});
+
+ipcMain.handle("delete-order", async (_event, id) => {
+  const res = await fetch(`${API_BASE}/orders/${id}`, { method: "DELETE" });
+  return res.json();
+});
+
+ipcMain.handle("get-suppliers", async () => {
+  const res = await fetch(`${API_BASE}/suppliers`);
+  return res.json();
+});
+
+ipcMain.handle("add-supplier", async (_event, supplierData) => {
+  const res = await fetch(`${API_BASE}/suppliers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(supplierData),
+  });
+  return res.json();
+});
+
+
+ipcMain.handle("record-sale", async (_event, saleData) => {
+  const res = await fetch(`${API_BASE}/sales`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(saleData),
+  });
+  return res.json();
+});
+
+ipcMain.handle("get-sales", async () => {
+  const res = await fetch(`${API_BASE}/sales`);
+  return res.json();
+});
+
+ipcMain.handle("get-inventory", async () => {
+  const res = await fetch(`${API_BASE}/inventory`);
+  return res.json();
+});
+ipcMain.handle("get-reorder-suggestions", async () => {
+  const res = await fetch(`${API_BASE}/inventory/reorder-suggestions`);
+  return res.json();
+});
+ipcMain.handle("get-forecast", async (_event, productId) => {
+  const res = await fetch(`${API_BASE}/inventory/forecast?productId=${productId}`);
+  return res.json();
+});
+ipcMain.handle("record-stock-movement", async (_event, movementData) => {
+  const res = await fetch(`${API_BASE}/inventory/movement`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(movementData),
+  });
+  return res.json();
+});
+ipcMain.handle("save-inventory-control", async (_event, controlData) => {
+  const res = await fetch(`${API_BASE}/inventory-controls`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(controlData),
+  });
+  return res.json();
+});
+// Analytics-related APIs
 ipcMain.handle('get-analytics-data', async () => {
-  const res = await fetch("http://localhost:5000/api/analytics");
+  const res = await fetch(`${API_BASE}/analytics`);
   if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
   return res.json();
 });
 
 ipcMain.handle('get-analytics-insights', async () => {
-  const res = await fetch("http://localhost:5000/api/analytics/insights");
+  const res = await fetch(`${API_BASE}/analytics/insights`);
   if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
   return res.json();
 });
