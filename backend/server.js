@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const winston = require('winston');
+const csvParser = require('csv-parser');
 require('dotenv').config();
 
 const app = express();
@@ -60,19 +61,16 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
 
 // Multer setup for file uploads
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const uploadDir = path.join(__dirname, 'Uploads');
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
+const upload = multer({
+    dest: 'uploads/csv/',
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only CSV files are allowed'));
         }
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
     }
 });
-const upload = multer({ storage });
 
 // Nodemailer setup
 const transporter = nodemailer.createTransport({
@@ -103,54 +101,101 @@ db.serialize(() => {
     thread_pitch TEXT,
     unit_price REAL
   )`);
-    db.run(`CREATE TABLE IF NOT EXISTS product_versions (
+    // Inventory movements table - references existing products table by product_id
+    db.run(`CREATE TABLE IF NOT EXISTS inventory_movements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER,
-    version INTEGER,
-    specs TEXT,
-    datasheet_url TEXT,
-    uploaded_at TEXT
-  )`);
-    db.run(`CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_name TEXT,
-    product_id INTEGER,
-    product_name TEXT,
-    quantity INTEGER,
-    status TEXT,
-    created_at TEXT,
-    updated_at TEXT
-  )`);
-    db.run(`CREATE TABLE IF NOT EXISTS inventory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER,
-    product_name TEXT,
-    stock INTEGER,
-    location TEXT,
-    last_updated TEXT
-  )`);
-    db.run(`CREATE TABLE IF NOT EXISTS qc_reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER,
-    batch_number TEXT,
-    date TEXT,
-    inspector TEXT,
-    defects TEXT,
-    units_inspected INTEGER,
-    units_passed INTEGER,
-    units_failed INTEGER,
-    result TEXT,
-    corrective_actions TEXT,
-    approval_status TEXT,
-    report_url TEXT
-  )`);
-    db.run(`CREATE TABLE IF NOT EXISTS compliance_docs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER,
-    file_url TEXT,
-    type TEXT,
-    uploaded_at TEXT
-  )`);
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    movement_type TEXT NOT NULL CHECK(movement_type IN (
+      'procurement', 
+      'sale', 
+      'adjustment', 
+      'return', 
+      'transfer_in', 
+      'transfer_out', 
+      'damage'
+    )),
+    reason TEXT,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(product_id) REFERENCES products(id)
+  )`, (err) => {
+        if (err) console.error("Error creating inventory_movements table:", err.message);
+    });
+
+    // Inventory control parameters table (optional)
+    // To store min_stock_level, safety_stock, lead_time_days per product
+    db.run(`CREATE TABLE IF NOT EXISTS inventory_controls (
+    product_id INTEGER PRIMARY KEY,
+    min_stock_level INTEGER DEFAULT 0,
+    safety_stock INTEGER DEFAULT 0,
+    lead_time_days INTEGER DEFAULT 0,
+    FOREIGN KEY(product_id) REFERENCES products(id)
+  )`, (err) => {
+        if (err) console.error("Error creating inventory_controls table:", err.message);
+    });
+    db.run(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      contact_email TEXT,
+      phone TEXT,
+      address TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+    // Create Orders Table
+    db.run(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER NOT NULL,
+      order_date TEXT NOT NULL,
+      status TEXT NOT NULL, -- e.g. 'pending', 'approved', 'received'
+      total_amount REAL NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
+    )
+  `);
+
+    // Create Order Items Table
+    db.run(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      unit_price REAL NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    )
+  `);
+
+    //     db.run(`CREATE TABLE IF NOT EXISTS qc_reports (
+    //     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //     product_id INTEGER,
+    //     batch_number TEXT,
+    //     date TEXT,
+    //     inspector TEXT,
+    //     defects TEXT,
+    //     units_inspected INTEGER,
+    //     units_passed INTEGER,
+    //     units_failed INTEGER,
+    //     result TEXT,
+    //     corrective_actions TEXT,
+    //     approval_status TEXT,
+    //     report_url TEXT
+    //   )`);
+    //     db.run(`CREATE TABLE IF NOT EXISTS compliance_docs (
+    //     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //     product_id INTEGER,
+    //     file_url TEXT,
+    //     type TEXT,
+    //     uploaded_at TEXT
+    //   )`);
     // Demo users
     db.get("SELECT COUNT(*) as count FROM users", (err, row) => {
         if (err) {
@@ -234,36 +279,105 @@ app.post('/api/products', (req, res) => {
         }
     );
 });
+// Update product (PUT)
+app.put('/api/products/:id', express.json(), (req, res) => {
+    const { id } = req.params;
+    const { product_name, sku, category, material, size, thread_pitch, unit_price } = req.body;
 
-app.post('/api/products/upload-csv', express.json(), (req, res) => {
-    const { products } = req.body;
-    if (!Array.isArray(products)) {
-        logger.error('Invalid CSV data: products is not an array');
-        return res.status(400).json({ message: "Invalid CSV data" });
-    }
-    const stmt = db.prepare(
-        "INSERT OR IGNORE INTO products (product_name, sku, category, material, size, thread_pitch, unit_price) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    );
-    for (const p of products) {
-        stmt.run([
-            p["Product Name"],
-            p["SKU / Part No."],
-            p["Category"],
-            p["Material"],
-            p["Size / Dimension"],
-            p["Thread Pitch"] || "",
-            parseFloat(p["Unit Price (₹)"]) || 0
-        ]);
-    }
-    stmt.finalize((err) => {
-        if (err) {
-            logger.error(`DB error finalizing CSV upload: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
+    db.run(
+        `UPDATE products SET 
+      product_name = ?, 
+      sku = ?, 
+      category = ?, 
+      material = ?, 
+      size = ?, 
+      thread_pitch = ?, 
+      unit_price = ? 
+     WHERE id = ?`,
+        [product_name, sku, category, material, size, thread_pitch || '', unit_price, id],
+        function (err) {
+            if (err) {
+                logger.error(`DB error updating product ${id}: ${err.message}`);
+                return res.status(500).json({ message: "DB error", error: err.message });
+            }
+            if (this.changes === 0) {
+                return res.status(404).json({ message: "Product not found" });
+            }
+            logger.info(`Updated product ${id}`);
+            res.json({ success: true });
         }
-        logger.info('CSV products uploaded successfully');
-        res.json({ success: true });
-    });
+    );
 });
+
+// Delete product (DELETE)
+app.delete('/api/products/:id', (req, res) => {
+    const { id } = req.params;
+    db.run(
+        `DELETE FROM products WHERE id = ?`,
+        [id],
+        function (err) {
+            if (err) {
+                logger.error(`DB error deleting product ${id}: ${err.message}`);
+                return res.status(500).json({ message: "DB error", error: err.message });
+            }
+            if (this.changes === 0) {
+                return res.status(404).json({ message: "Product not found" });
+            }
+            logger.info(`Deleted product ${id}`);
+            res.json({ success: true });
+        }
+    );
+});
+
+
+app.post('/api/products/upload-csv', upload.single('csvfile'), (req, res) => {
+    if (!req.file) return res.status(400).json({ message: 'No CSV file uploaded' });
+
+    const results = [];
+    const filePath = path.resolve(req.file.path);
+
+    fs.createReadStream(filePath)
+        .pipe(csvParser())
+        .on('data', (data) => results.push(data))
+        .on('end', () => {
+            const stmt = db.prepare(`INSERT OR IGNORE INTO products 
+        (product_name, sku, category, material, size, thread_pitch, unit_price) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+
+            db.serialize(() => {
+                for (const p of results) {
+                    // LOG for debugging
+                    logger.info('Inserting product:', p);
+
+                    stmt.run([
+                        p.product_name,
+                        p.sku,
+                        p.category,
+                        p.material,
+                        p.size,
+                        (p.thread_pitch && p.thread_pitch !== 'N/A') ? p.thread_pitch : '',
+                        parseFloat(p.unit_price) || 0
+                    ]);
+                }
+                stmt.finalize((err) => {
+                    fs.unlink(filePath, () => { });
+                    if (err) {
+                        logger.error('DB error on CSV insert:', err);
+                        return res.status(500).json({ message: 'Database error', error: err.message });
+                    }
+                    logger.info('CSV products uploaded successfully');
+                    res.json({ success: true, inserted: results.length });
+                });
+            });
+        })
+        .on('error', (err) => {
+            fs.unlink(filePath, () => { });
+            logger.error('CSV parsing error:', err);
+            res.status(400).json({ message: 'CSV parsing error', error: err.message });
+        });
+});
+
+
 
 app.post('/api/products/:id/version', upload.single('datasheet'), (req, res) => {
     const { id } = req.params;
@@ -299,146 +413,459 @@ app.get('/api/products/:id/versions', (req, res) => {
     });
 });
 
-// Orders
+// ORDER MANAGEMENT APIS
+// Get all orders (with optional search/status)
 app.get('/api/orders', (req, res) => {
-    db.all("SELECT * FROM orders ORDER BY created_at DESC", (err, rows) => {
-        if (err) {
-            logger.error(`DB error fetching orders: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
-        }
-        res.json(rows || []);
+    const { search = "", status = "" } = req.query;
+    let sql = `
+    SELECT o.id, s.name AS supplier_name, o.order_date, o.status,
+      IFNULL(SUM(oi.quantity * oi.unit_price), 0) AS total_amount
+    FROM orders o
+    JOIN suppliers s ON o.supplier_id = s.id
+    LEFT JOIN order_items oi ON o.id = oi.order_id
+    WHERE 1=1
+  `;
+    const params = [];
+    if (search) {
+        sql += " AND (s.name LIKE ? OR o.id LIKE ?)";
+        params.push(`%${search}%`, `%${search}%`);
+    }
+    if (status) {
+        sql += " AND o.status = ?";
+        params.push(status);
+    }
+    sql += " GROUP BY o.id ORDER BY o.order_date DESC";
+
+    db.all(sql, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
     });
 });
 
+// --- Get order details by id (with product_id and product_name for each item) ---
 app.get('/api/orders/:id', (req, res) => {
-    db.get("SELECT * FROM orders WHERE id=?", [req.params.id], (err, row) => {
-        if (err) {
-            logger.error(`DB error fetching order ${req.params.id}: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
-        }
-        if (!row) {
-            logger.warn(`Order ${req.params.id} not found`);
-            return res.status(404).json({ message: "Order not found" });
-        }
-        res.json(row);
-    });
-});
+    const orderId = req.params.id;
+    db.get(
+        `SELECT o.id, o.supplier_id, s.name AS supplier_name, o.order_date, o.status
+     FROM orders o JOIN suppliers s ON o.supplier_id = s.id WHERE o.id = ?`,
+        [orderId],
+        (err, order) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (!order) return res.status(404).json({ error: "Order not found" });
 
-app.post('/api/orders/customer', (req, res) => {
-    const { customer_name, product_id, product_name, quantity } = req.body;
-    const now = new Date().toISOString();
-    db.run("INSERT INTO orders (customer_name, product_id, product_name, quantity, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [customer_name, product_id, product_name, quantity, "Pending", now, now],
-        function (err) {
-            if (err) {
-                logger.error(`DB error adding order: ${err.message}`);
-                return res.status(500).json({ message: "DB error" });
-            }
-            transporter.sendMail({
-                from: '"Fastener Portal" <no-reply@fasteners.com>',
-                to: process.env.STAFF_EMAIL || "staff@company.com",
-                subject: "New Customer Order",
-                text: `A new order for ${quantity} x ${product_name} has been placed by ${customer_name}.`
-            }, (err, info) => {
-                if (err) {
-                    logger.error(`Email error: ${err.message}`);
-                } else {
-                    logger.info(`Email sent: ${info.response}`);
+            db.all(
+                `SELECT oi.id, oi.product_id, p.product_name, oi.quantity, oi.unit_price
+         FROM order_items oi
+         JOIN products p ON oi.product_id = p.id
+         WHERE oi.order_id = ?`,
+                [orderId],
+                (err, items) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    const total_amount = items.reduce((sum, i) => sum + i.quantity * i.unit_price, 0);
+                    res.json({ ...order, items, total_amount });
                 }
-            });
-            logger.info(`Added order for ${product_name} by ${customer_name}`);
-            res.status(201).json({ id: this.lastID });
+            );
         }
     );
 });
 
-// Inventory
+// --- Save (create or update) order, with status ---
+app.post('/api/orders', (req, res) => {
+    const { id, supplier_id, order_date, status, items } = req.body;
+    if (!supplier_id || !order_date || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Validate items structure
+    for (const item of items) {
+        if (!item || typeof item !== 'object' ||
+            !('quantity' in item) || !('unit_price' in item) ||
+            isNaN(parseFloat(item.quantity)) || isNaN(parseFloat(item.unit_price))) {
+            return res.status(400).json({ error: "Each item must have valid quantity and unit_price" });
+        }
+    }
+
+    // Calculate total_amount with explicit number conversion
+    const total_amount = items.reduce((sum, item) => {
+        const qty = parseFloat(item.quantity);
+        const price = parseFloat(item.unit_price);
+        return sum + qty * price;
+    }, 0);
+
+
+    console.log("/api/orders", req.body, "total amount", total_amount);
+    if (id) {
+        console.log("Updating order", id);
+        // Fetch current status
+        db.get(`SELECT status FROM orders WHERE id = ?`, [id], (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            const prevStatus = row ? row.status : null;
+            db.run(
+                `UPDATE orders SET supplier_id = ?, order_date = ?, status = ?, total_amount = ? WHERE id = ?`,
+                [supplier_id, order_date, status, total_amount, id],
+                (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    db.run(`DELETE FROM order_items WHERE order_id = ?`, [id], (err) => {
+                        if (err) return res.status(500).json({ error: err.message });
+                        const stmt = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)`);
+                        for (const item of items) {
+                            stmt.run(id, item.product_id, item.quantity, item.unit_price);
+                        }
+                        stmt.finalize((err) => {
+                            if (err) return res.status(500).json({ error: err.message });
+
+                            // If status changed to 'received' and was not 'received' before, insert inventory movements
+                            if (status === 'received' && prevStatus !== 'received') {
+                                console.log("Inserting inventory movements for received order");
+                                items.forEach((item) => {
+                                    db.run(
+                                        "INSERT INTO inventory_movements (product_id, quantity, movement_type, reason) VALUES (?, ?, 'procurement', ?)",
+                                        [item.product_id, item.quantity, `Order #${id} received`],
+                                        (err) => { if (err) console.error(err); }
+                                    );
+                                });
+                            }
+
+                            res.json({ success: true });
+                        });
+                    });
+                }
+            );
+        });
+    } else {
+        // Insert new order
+        console.log("Inserting new order");
+        db.run(
+            `INSERT INTO orders (supplier_id, order_date, status, total_amount) VALUES (?, ?, ?, ?)`,
+            [supplier_id, order_date, status, total_amount],
+            function (err) {
+                if (err) {
+                    console.error("Failed to insert order:", err);
+                    console.log(total_amount);
+                    return res.status(500).json({ error: err.message });
+                }
+                const orderId = this.lastID;
+                const stmt = db.prepare(`INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)`);
+                for (const item of items) {
+                    stmt.run(orderId, item.product_id, item.quantity, item.unit_price);
+                    if (err) {
+                        console.error("Failed to insert order item:", err);
+                        return res.status(500).json({ error: err.message });
+                    }
+                }
+                stmt.finalize((err) => {
+                    if (err) {
+                        console.error("Failed to finalize order_items insert:", err);
+                        return res.status(500).json({ error: err.message });
+                    }
+
+                    // If new order is immediately 'received', insert inventory movements
+                    if (status === 'received') {
+                        items.forEach((item) => {
+                            db.run(
+                                "INSERT INTO inventory_movements (product_id, quantity, movement_type, reason) VALUES (?, ?, 'procurement', ?)",
+                                [item.product_id, item.quantity, `Order #${orderId} received`],
+                                (err) => { if (err) console.error(err); }
+                            );
+                        });
+                    }
+                    logger.info(`Inserted new order ${orderId}`);
+                    res.json({ success: true, id: orderId });
+                });
+            }
+        );
+    }
+});
+
+
+// --- Mark order as received and update inventory ---
+app.post('/api/orders/:id/receive', (req, res) => {
+    const orderId = req.params.id;
+    db.all(
+        "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
+        [orderId],
+        (err, items) => {
+            if (err) {
+                console.error("api/orders/receive-Failed to fetch order items:", err);
+                return res.status(500).json({ error: err.message });
+            }
+            items.forEach((item) => {
+                db.run(
+                    "INSERT INTO inventory_movements (product_id, quantity, movement_type, reason) VALUES (?, ?, 'procurement', ?)",
+                    [item.product_id, item.quantity, `Order #${orderId} received`],
+                    (err) => { if (err) console.error(err); }
+                );
+            });
+            db.run(
+                "UPDATE orders SET status = 'received' WHERE id = ?",
+                [orderId],
+                (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json({ success: true });
+                }
+            );
+        }
+    );
+});
+// Delete order (DELETE)
+// Delete an order if not received
+// app.delete('/api/orders/:id', (req, res) => {
+//     const orderId = req.params.id;
+//     console.log("Deleting order", orderId);
+//     db.serialize(() => {
+//         db.get('SELECT status FROM orders WHERE id = ?', [orderId], (err, row) => {
+//             if (err) return res.status(500).json({ error: err.message });
+//             if (!row) return res.status(404).json({ error: 'Order not found' });
+//             if (row.status === 'received') {
+//                 return res.status(400).json({ error: "Cannot delete a received order." });
+//             }
+
+//             // First delete order items
+//             db.run('DELETE FROM order_items WHERE order_id = ?', [orderId], function (err) {
+//                 if (err) return res.status(500).json({ error: err.message });
+
+//                 // Then delete the order itself
+//                 db.run('DELETE FROM orders WHERE id = ?', [orderId], function (err) {
+//                     if (err) return res.status(500).json({ error: err.message });
+//                     logger.info(`Deleted order ${orderId} and its items`);
+//                     res.json({ success: true });
+//                 });
+//             });
+//         });
+//     });
+// });
+
+
+
+// Get suppliers list
+app.get('/api/suppliers', (req, res) => {
+    db.all("SELECT * FROM suppliers ORDER BY name ASC", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+
+// Add supplier
+app.post('/api/suppliers', (req, res) => {
+    const { name, contact_email, phone, address } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    db.run(
+        `INSERT INTO suppliers (name, contact_email, phone, address) VALUES (?, ?, ?, ?)`,
+        [name, contact_email, phone, address],
+        function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id: this.lastID });
+        }
+    );
+});
+
+
+// Record a sale (customer order) and update inventory
+app.post('/api/sales', (req, res) => {
+    const { product_id, quantity, customer_name, order_note } = req.body;
+    if (!product_id || !quantity || quantity <= 0)
+        return res.status(400).json({ error: 'Invalid product or quantity' });
+
+    db.get(
+        "SELECT COALESCE(SUM(quantity), 0) AS stock FROM inventory_movements WHERE product_id = ?",
+        [product_id],
+        (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (row.stock < quantity) {
+                return res.status(400).json({ error: "Insufficient stock" });
+            }
+            db.run(
+                `INSERT INTO inventory_movements (product_id, quantity, movement_type, reason)
+         VALUES (?, ?, 'sale', ?)`,
+                [product_id, -quantity, `Sold to ${customer_name || "customer"}${order_note ? " - " + order_note : ""}`],
+                function (err) {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json({ success: true, id: this.lastID });
+                }
+            );
+        }
+    );
+});
+
+// Get recent sales movements (for history)
+app.get('/api/sales', (req, res) => {
+    db.all(`
+    SELECT im.id, p.product_name, im.quantity, im.reason, im.timestamp
+    FROM inventory_movements im
+    JOIN products p ON im.product_id = p.id
+    WHERE im.movement_type = 'sale'
+    ORDER BY im.timestamp DESC
+    LIMIT 50
+  `, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+
+
+// --- INVENTORY MANAGEMENT APIS ---
+
+// GET /api/inventory - current stock with low stock flag
 app.get('/api/inventory', (req, res) => {
-    db.all("SELECT * FROM inventory", (err, rows) => {
-        if (err) {
-            logger.error(`DB error fetching inventory: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
-        }
-        res.json(rows || []);
+    const sql = `
+    SELECT p.id, p.product_name, p.sku, p.category, p.material, p.size, p.thread_pitch, p.unit_price,
+      COALESCE(SUM(im.quantity), 0) AS quantity_on_hand,
+      COALESCE(ic.min_stock_level, 0) AS min_stock_level,
+      CASE WHEN COALESCE(SUM(im.quantity), 0) <= COALESCE(ic.min_stock_level, 0) THEN 1 ELSE 0 END AS low_stock
+    FROM products p
+    LEFT JOIN inventory_movements im ON p.id = im.product_id
+    LEFT JOIN inventory_controls ic ON p.id = ic.product_id
+    GROUP BY p.id
+    ORDER BY p.product_name ASC
+  `;
+    db.all(sql, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
     });
 });
 
-app.get('/api/inventory/alerts', (req, res) => {
-    db.all("SELECT * FROM inventory WHERE stock < 20", (err, rows) => {
-        if (err) {
-            logger.error(`DB error fetching inventory alerts: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
-        }
-        res.json({ lowStock: rows });
+
+// GET /api/inventory/reorder-suggestions
+app.get('/api/inventory/reorder-suggestions', (req, res) => {
+    const sql = `
+        SELECT p.id, p.product_name, COALESCE(SUM(im.quantity), 0) AS quantity_on_hand,
+            COALESCE(ic.min_stock_level, 0) AS min_stock_level,
+            COALESCE(ic.safety_stock, 0) AS safety_stock,
+            COALESCE(ic.lead_time_days, 0) AS lead_time_days,
+            AVG(CASE WHEN im.movement_type = 'sale' THEN ABS(im.quantity) ELSE 0 END) AS avg_daily_sales
+        FROM products p
+        LEFT JOIN inventory_movements im ON p.id = im.product_id
+        LEFT JOIN inventory_controls ic ON p.id = ic.product_id
+        GROUP BY p.id
+        HAVING quantity_on_hand <= (safety_stock + (lead_time_days * avg_daily_sales))
+    `;
+    db.all(sql, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const suggestions = rows.map(item => {
+            const reorder_qty = Math.max(
+                0,
+                Math.ceil((item.lead_time_days + 3) * item.avg_daily_sales) - item.quantity_on_hand + item.safety_stock
+            );
+            return { ...item, reorder_qty };
+        });
+        res.json(suggestions);
     });
 });
 
+// GET /api/inventory/forecast?productId=ID
 app.get('/api/inventory/forecast', (req, res) => {
-    db.all("SELECT product_id, product_name, stock FROM inventory", (err, rows) => {
-        if (err) {
-            logger.error(`DB error fetching inventory forecast: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
+    const productId = req.query.productId;
+    if (!productId) return res.status(400).json({ error: 'productId required' });
+
+    db.all(
+        `SELECT date(timestamp) AS date, ABS(quantity) AS quantity
+         FROM inventory_movements 
+         WHERE product_id = ? AND movement_type = 'sale' 
+         ORDER BY date ASC`,
+        [productId],
+        (err, sales) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (!sales.length) return res.json([]);
+            const windowSize = 7;
+            const forecast = [];
+            for (let i = 0; i <= sales.length - windowSize; i++) {
+                const window = sales.slice(i, i + windowSize);
+                const avg = window.reduce((sum, s) => sum + s.quantity, 0) / windowSize;
+                forecast.push({ date: window[windowSize - 1].date, forecast: avg });
+            }
+            res.json(forecast);
         }
-        const forecast = rows.map(r => ({
-            product_id: r.product_id,
-            product_name: r.product_name,
-            forecast: Math.max(0, r.stock - Math.floor(Math.random() * 10 + 5))
-        }));
-        res.json(forecast);
-    });
+    );
 });
+
+// POST /api/inventory/movement
+app.post('/api/inventory/movement', (req, res) => {
+    const { product_id, quantity, movement_type, reason } = req.body;
+    if (!product_id || !quantity || !movement_type)
+        return res.status(400).json({ error: 'Missing required fields' });
+
+    db.run(
+        `INSERT INTO inventory_movements (product_id, quantity, movement_type, reason) VALUES (?, ?, ?, ?)`,
+        [product_id, quantity, movement_type, reason || null],
+        function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id: this.lastID });
+        }
+    );
+});
+
+// POST /api/inventory-controls (upsert inventory control parameters)
+app.post('/api/inventory-controls', (req, res) => {
+    const { product_id, min_stock_level, safety_stock, lead_time_days } = req.body;
+    if (!product_id) return res.status(400).json({ error: 'product_id required' });
+
+    db.run(
+        `INSERT INTO inventory_controls (product_id, min_stock_level, safety_stock, lead_time_days)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(product_id) DO UPDATE SET
+           min_stock_level=excluded.min_stock_level,
+           safety_stock=excluded.safety_stock,
+           lead_time_days=excluded.lead_time_days`,
+        [product_id, min_stock_level || 0, safety_stock || 0, lead_time_days || 0],
+        function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true });
+        }
+    );
+});
+
 
 // Quality Control & Compliance
-app.post('/api/qc_reports', upload.single('report'), (req, res) => {
-    const { product_id, batch_number, inspector, defects, units_inspected, units_passed, units_failed, result, corrective_actions, approval_status } = req.body;
-    const report_url = req.file ? `/uploads/${req.file.filename}` : null;
-    db.run(`INSERT INTO qc_reports (product_id, batch_number, date, inspector, defects, units_inspected, units_passed, units_failed, result, corrective_actions, approval_status, report_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [product_id, batch_number, new Date().toISOString(), inspector, defects, units_inspected, units_passed, units_failed, result, corrective_actions, approval_status, report_url],
-        function (err) {
-            if (err) {
-                logger.error(`DB error adding QC report: ${err.message}`);
-                return res.status(500).json({ message: "DB error" });
-            }
-            logger.info(`Added QC report for product ${product_id}`);
-            res.status(201).json({ id: this.lastID });
-        });
-});
+// app.post('/api/qc_reports', upload.single('report'), (req, res) => {
+//     const { product_id, batch_number, inspector, defects, units_inspected, units_passed, units_failed, result, corrective_actions, approval_status } = req.body;
+//     const report_url = req.file ? `/uploads/${req.file.filename}` : null;
+//     db.run(`INSERT INTO qc_reports (product_id, batch_number, date, inspector, defects, units_inspected, units_passed, units_failed, result, corrective_actions, approval_status, report_url)
+//         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//         [product_id, batch_number, new Date().toISOString(), inspector, defects, units_inspected, units_passed, units_failed, result, corrective_actions, approval_status, report_url],
+//         function (err) {
+//             if (err) {
+//                 logger.error(`DB error adding QC report: ${err.message}`);
+//                 return res.status(500).json({ message: "DB error" });
+//             }
+//             logger.info(`Added QC report for product ${product_id}`);
+//             res.status(201).json({ id: this.lastID });
+//         });
+// });
 
-app.get('/api/qc_reports', (req, res) => {
-    db.all("SELECT * FROM qc_reports ORDER BY date DESC", (err, rows) => {
-        if (err) {
-            logger.error(`DB error fetching QC reports: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
-        }
-        res.json(rows || []);
-    });
-});
+// app.get('/api/qc_reports', (req, res) => {
+//     db.all("SELECT * FROM qc_reports ORDER BY date DESC", (err, rows) => {
+//         if (err) {
+//             logger.error(`DB error fetching QC reports: ${err.message}`);
+//             return res.status(500).json({ message: "DB error" });
+//         }
+//         res.json(rows || []);
+//     });
+// });
 
-app.post('/api/compliance_docs', upload.single('file'), (req, res) => {
-    const { product_id, type } = req.body;
-    const file_url = req.file ? `/Uploads/${req.file.filename}` : null;
-    db.run("INSERT INTO compliance_docs (product_id, file_url, type, uploaded_at) VALUES (?, ?, ?, ?)",
-        [product_id, file_url, type, new Date().toISOString()],
-        function (err) {
-            if (err) {
-                logger.error(`DB error adding compliance doc: ${err.message}`);
-                return res.status(500).json({ message: "DB error" });
-            }
-            logger.info(`Added compliance doc for product ${product_id}`);
-            res.status(201).json({ id: this.lastID });
-        });
-});
+// app.post('/api/compliance_docs', upload.single('file'), (req, res) => {
+//     const { product_id, type } = req.body;
+//     const file_url = req.file ? `/Uploads/${req.file.filename}` : null;
+//     db.run("INSERT INTO compliance_docs (product_id, file_url, type, uploaded_at) VALUES (?, ?, ?, ?)",
+//         [product_id, file_url, type, new Date().toISOString()],
+//         function (err) {
+//             if (err) {
+//                 logger.error(`DB error adding compliance doc: ${err.message}`);
+//                 return res.status(500).json({ message: "DB error" });
+//             }
+//             logger.info(`Added compliance doc for product ${product_id}`);
+//             res.status(201).json({ id: this.lastID });
+//         });
+// });
 
-app.get('/api/compliance_docs', (req, res) => {
-    db.all("SELECT * FROM compliance_docs ORDER BY uploaded_at DESC", (err, rows) => {
-        if (err) {
-            logger.error(`DB error fetching compliance docs: ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
-        }
-        res.json(rows || []);
-    });
-});
+// app.get('/api/compliance_docs', (req, res) => {
+//     db.all("SELECT * FROM compliance_docs ORDER BY uploaded_at DESC", (err, rows) => {
+//         if (err) {
+//             logger.error(`DB error fetching compliance docs: ${err.message}`);
+//             return res.status(500).json({ message: "DB error" });
+//         }
+//         res.json(rows || []);
+//     });
+// });
 
 // Analytics
 app.get('/api/analytics', (req, res) => {
