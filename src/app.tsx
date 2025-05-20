@@ -11,11 +11,11 @@ import ForbiddenPage from "./components/auth/ForbiddenPage";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import MainLayout from "./components/MainLayout";
-import UserDetails from "./components/UserDetails";
-import ProductCatalog from "./components/ProductCatalog";
-import OrderTracking from "./components/OrderProcurement";
-import InventoryManagement from "./components/InventoryManagement";
-import AnalyticsDashboard from "./components/AnalyticsDashboard";
+import UserDetails from "./pages/UserDetails";
+import ProductCatalog from "./pages/ProductCatalog";
+import OrderTracking from "./pages/OrderProcurement";
+import InventoryManagement from "./pages/InventoryManagement";
+import AnalyticsDashboard from "./pages/AnalyticsDashboard";
 import QualityControl from "./components/QualityControl";
 
 export default function App() {
@@ -41,7 +41,7 @@ export default function App() {
 
 
                     {/* Admin-only route example */}
-                    <Route
+                    {/* <Route
                         path="/admin"
                         element={
                             <ProtectedRoute requiredRole="admin">
@@ -51,26 +51,12 @@ export default function App() {
                                 </MainLayout>
                             </ProtectedRoute>
                         }
-                    />
-
-                    {/* Manager-level route example */}
-                    <Route
-                        path="/inventory"
-                        element={
-                            <ProtectedRoute requiredRole="manager">
-                                <MainLayout>
-                                    <h1 className="text-2xl font-bold">Inventory Management</h1>
-                                    <p>Managers and admins can see this page</p>
-                                </MainLayout>
-                            </ProtectedRoute>
-                        }
-                    />
+                    /> */}
 
                     <Route path="/user" element={<ProtectedRoute><MainLayout><UserDetails /></MainLayout></ProtectedRoute>} />
                     <Route path="/products" element={<ProtectedRoute><MainLayout><ProductCatalog /></MainLayout></ProtectedRoute>} />
                     <Route path="/orders" element={<ProtectedRoute><MainLayout><OrderTracking /></MainLayout></ProtectedRoute>} />
-                    <Route path="/inventory" element={<ProtectedRoute><MainLayout><InventoryManagement /></MainLayout></ProtectedRoute>} />
-                    <Route path="/qc" element={<ProtectedRoute><MainLayout><QualityControl /></MainLayout></ProtectedRoute>} />
+                    <Route path="/inventory" element={<ProtectedRoute requiredRole="manager"><MainLayout><InventoryManagement /></MainLayout></ProtectedRoute>} />
                     <Route path="/analytics" element={<ProtectedRoute><MainLayout><AnalyticsDashboard /></MainLayout></ProtectedRoute>} />
 
                     {/* Redirect to login by default */}
