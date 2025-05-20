@@ -1,5 +1,20 @@
 import React from 'react';
+import {
+    LockClosedIcon,
+    EnvelopeIcon,
+    UserCircleIcon,
+    PencilSquareIcon,
+    ArrowLeftStartOnRectangleIcon
+} from "@heroicons/react/24/outline";
 
+// Export all icons from this file
+export {
+    LockClosedIcon,
+    EnvelopeIcon,
+    UserCircleIcon,
+    PencilSquareIcon,
+    ArrowLeftStartOnRectangleIcon
+};
 // Export all icons from this file
 export function DashboardIcon({ className = "w-6 h-6" }) {
     return (
