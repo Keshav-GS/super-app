@@ -9,6 +9,7 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  lastLogin: string;
 }
 
 // Auth context interface
@@ -66,8 +67,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       const userData = await window.api.login(email, password);
-      setCurrentUser(userData);
-      localStorage.setItem('currentUser', JSON.stringify(userData));
+      const updatedUser = {
+        ...userData,
+        lastLogin: userData.lastLogin || new Date().toISOString()
+      };
+      setCurrentUser(updatedUser);
+      localStorage.setItem('currentUser', JSON.stringify(updatedUser));
     } catch (error) {
       throw new Error(error.message || 'Login failed');
     }
