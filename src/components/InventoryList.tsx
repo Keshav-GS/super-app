@@ -15,9 +15,10 @@ interface Product {
 interface InventoryListProps {
     products: Product[];
     onSelect: (id: number) => void;
+    onEditControls: (id: number) => void;
 }
 
-export default function InventoryList({ products, onSelect }: InventoryListProps) {
+export default function InventoryList({ products, onSelect, onEditControls }: InventoryListProps) {
     return (
         <div className="overflow-x-auto border rounded shadow">
             <table className="min-w-full divide-y divide-gray-200">
@@ -50,6 +51,14 @@ export default function InventoryList({ products, onSelect }: InventoryListProps
                                 ) : (
                                     <span className="text-green-600">OK</span>
                                 )}
+                            </td>
+                            <td>
+                                <button
+                                    className="text-blue-600 hover:underline"
+                                    onClick={e => { e.stopPropagation(); onEditControls(p.id); }}
+                                >
+                                    Edit Controls
+                                </button>
                             </td>
                         </tr>
                     ))}
