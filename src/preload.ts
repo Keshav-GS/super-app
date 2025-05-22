@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
     getReorderSuggestions: () => ipcRenderer.invoke("get-reorder-suggestions"),
     getForecast: (productId: number) => ipcRenderer.invoke("get-forecast", productId),
     recordStockMovement: (movementData: any) => ipcRenderer.invoke("record-stock-movement", movementData),
+    getInventoryControls: (productId: number) => ipcRenderer.invoke("get-inventory-controls", productId),
     saveInventoryControl: (controlData: any) => ipcRenderer.invoke("save-inventory-control", controlData),
     //Analytics-related APIs
     getAnalyticsData: () => ipcRenderer.invoke('get-analytics-data'),

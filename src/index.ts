@@ -258,6 +258,10 @@ ipcMain.handle("record-stock-movement", async (_event, movementData) => {
   });
   return res.json();
 });
+ipcMain.handle("get-inventory-controls", async (_event, productId) => {
+  const res = await fetch(`${API_BASE}/inventory-controls?productId=${productId}`);
+  return res.json();
+});
 ipcMain.handle("save-inventory-control", async (_event, controlData) => {
   const res = await fetch(`${API_BASE}/inventory-controls`, {
     method: "POST",
