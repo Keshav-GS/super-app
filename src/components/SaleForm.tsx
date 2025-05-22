@@ -9,9 +9,10 @@ interface Product {
 
 interface Props {
     onSaleRecorded?: () => void;
+    inventoryRefresh?: number;
 }
 
-export default function SaleForm({ onSaleRecorded }: Props) {
+export default function SaleForm({ onSaleRecorded, inventoryRefresh }: Props) {
     const [products, setProducts] = useState<Product[]>([]);
     const [productId, setProductId] = useState<number | "">("");
     const [quantity, setQuantity] = useState<number>(0);
@@ -20,12 +21,10 @@ export default function SaleForm({ onSaleRecorded }: Props) {
     const [error, setError] = useState<string>("");
     const [success, setSuccess] = useState<string>("");
 
-    useEffect(() => {
-        // window.api.getInventory().then(setProducts);
-    }, []);
+
     useEffect(() => {
         window.api.getInventory().then(setProducts);
-    }, []);
+    }, [inventoryRefresh]);
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");

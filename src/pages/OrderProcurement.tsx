@@ -12,7 +12,7 @@ export default function OrderProcurement() {
     const [showOrderForm, setShowOrderForm] = useState(false);
     const [showSupplierForm, setShowSupplierForm] = useState(false);
     const [refreshList, setRefreshList] = useState(false);
-
+    const [inventoryRefresh, setInventoryRefresh] = useState(0);
     const openNewOrderForm = () => {
         setEditingOrderId(null);
         setShowOrderForm(true);
@@ -82,7 +82,7 @@ export default function OrderProcurement() {
             )}
 
             {selectedOrderId !== null && (
-                <OrderDetails orderId={selectedOrderId} onClose={() => { closeModals(); refresh(); }} />
+                <OrderDetails orderId={selectedOrderId} onClose={() => { closeModals(); refresh(); setInventoryRefresh(prev => prev + 1) }} />
             )}
 
             {showSupplierForm && (
@@ -95,7 +95,13 @@ export default function OrderProcurement() {
             )}
 
             {/* Sale form and sales history */}
-            <SaleForm onSaleRecorded={refresh} />
+            <SaleForm
+                onSaleRecorded={() => {
+                    refresh();
+                    setInventoryRefresh(prev => prev + 1);
+                }}
+                inventoryRefresh={inventoryRefresh}
+            />
 
         </div>
     );
