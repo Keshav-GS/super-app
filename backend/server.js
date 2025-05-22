@@ -793,6 +793,17 @@ app.post('/api/inventory/movement', (req, res) => {
         }
     );
 });
+app.get('/api/inventory-controls', (req, res) => {
+    const productId = req.query.productId;
+    db.get(
+        `SELECT min_stock_level, safety_stock, lead_time_days FROM inventory_controls WHERE product_id = ?`,
+        [productId],
+        (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json(row || null);
+        }
+    );
+});
 
 // POST /api/inventory-controls (upsert inventory control parameters)
 app.post('/api/inventory-controls', (req, res) => {
