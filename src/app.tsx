@@ -16,7 +16,6 @@ import ProductCatalog from "./pages/ProductCatalog";
 import OrderTracking from "./pages/OrderProcurement";
 import InventoryManagement from "./pages/InventoryManagement";
 import AnalyticsDashboard from "./pages/AnalyticsDashboard";
-import QualityControl from "./components/QualityControl";
 
 export default function App() {
     return (
@@ -38,20 +37,6 @@ export default function App() {
                             </ProtectedRoute>
                         }
                     />
-
-
-                    {/* Admin-only route example */}
-                    {/* <Route
-                        path="/admin"
-                        element={
-                            <ProtectedRoute requiredRole="admin">
-                                <MainLayout>
-                                    <h1 className="text-2xl font-bold">Admin Panel</h1>
-                                    <p>Only admins can see this page</p>
-                                </MainLayout>
-                            </ProtectedRoute>
-                        }
-                    /> */}
 
                     <Route path="/user" element={<ProtectedRoute><MainLayout><UserDetails /></MainLayout></ProtectedRoute>} />
                     <Route path="/products" element={<ProtectedRoute><MainLayout><ProductCatalog /></MainLayout></ProtectedRoute>} />
