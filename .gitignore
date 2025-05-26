@@ -90,3 +90,8 @@ typings/
 
 # Electron-Forge
 out/
+
+#virtual environment
+venv/
+
+__pycache__/
