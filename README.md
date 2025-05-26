@@ -1,59 +1,80 @@
 # Super App
 
-A modular AI-powered analytics dashboard with the following modules:
-
+A modular AI-powered analytics dashboard featuring:
 - **ProductCatalog**
 - **OrderProcurement**
 - **InventoryManagement**
 - **AnalyticsDashboard**
 
-Developed and maintained by [priyanshuranjan03](https://github.com/priyanshuranjan03).
+Developed and maintained by [Priyanshu Ranjan](https://github.com/priyanshuranjan03).
 
-------
+---
 
-## Getting Started
+## Overview
 
-Follow these steps to set up and run the app locally.
+Super App integrates a React frontend with a FastAPI-powered AI service. This README provides clear instructions to set up and run the application locally.
 
-### 1. Clone the repository
+---
 
+## Prerequisites
+
+Ensure you have the following installed:
+- [Git](https://git-scm.com/)
+- [Node.js & npm](https://nodejs.org/)
+- [Python 3.8+](https://www.python.org/downloads/)
+- (Optional) A code editor like [VSCode](https://code.visualstudio.com/)
+
+---
+
+## Setup Instructions
+
+### 1. Clone the Repository
+
+Open your terminal and run:
+
+```bash
 git clone https://github.com/priyanshuranjan03/super-app.git
 cd super-app
+```
 
-### 2. Install frontend dependencies
-
+### 2. Install frontend dependencies:
+```bash
 npm install
-
-### 3. Setup the AI service environment
-
+```
+### 3. Setup the AI service environment:
+```bash
 cd ai-service
-
-Create virtual environment
+```
+Create virtual environment:
+```bash
 python -m venv venv
-
-Activate virtual environment
+```
+Activate virtual environment:
+```bash
 Windows:
 venv\Scripts\activate
 
 macOS/Linux:
 source venv/bin/activate
-
-Install Python dependencies
+```
+Install Python dependencies:
+```bash
 pip install -r requirements.txt
-
+```
 Deactivate virtual environment after installation
+```bash
 deactivate
-
 cd ..
-
+```
 
 ### 4. Configure environment variables
 
 Create a `.env` file in the root of the project (`super-app/.env`) with the following content:
-
+```bash
 HUGGINGFACE_TOKEN=your_huggingface_api_token_here
 NODE_ENV=development
 PORT=5000
+```
 
 - Replace `your_huggingface_api_token_here` with your actual Hugging Face API token.
 - `NODE_ENV` and `PORT` are used by the React frontend and backend.
@@ -63,9 +84,9 @@ PORT=5000
 ### 5. Start the application
 
 Run the provided batch script to start both the frontend and AI backend services concurrently:
-
+```bash
 start.bat
-
+```
 This will:
 
 - Start the React frontend on the port specified in `.env` (default 5000).
