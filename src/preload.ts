@@ -29,4 +29,7 @@ contextBridge.exposeInMainWorld('api', {
     //Analytics-related APIs
     getAnalyticsData: () => ipcRenderer.invoke('get-analytics-data'),
     getAnalyticsInsights: () => ipcRenderer.invoke('get-analytics-insights'),
+    getAIForecast: (productId: number) => ipcRenderer.invoke("get-ai-forecast", productId),
+    getAIAnomaly: (productId: number) => ipcRenderer.invoke("get-ai-anomaly", productId),
+    getNLQInsights: (productId: number) => ipcRenderer.invoke('get-nlq-insights', productId),
 });

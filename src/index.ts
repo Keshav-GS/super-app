@@ -282,4 +282,30 @@ ipcMain.handle('get-analytics-insights', async () => {
   if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
   return res.json();
 });
+ipcMain.handle("get-ai-forecast", async (_event, productId) => {
+  const res = await fetch(`http://localhost:5000/api/ai/forecast/${productId}`);
+  return res.json();
+});
+ipcMain.handle("get-ai-anomaly", async (_event, productId) => {
+  const res = await fetch(`http://localhost:5000/api/ai/anomaly/${productId}`);
+  return res.json();
+});
+ipcMain.handle("get-nlq-insights", async (_event, productId) => {
+  // console.log("Fetching NLQ insights in index for product ID:", productId);
+  const res = await fetch("http://localhost:5000/api/ai/nlq", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ productId }),
+  });
+  const contentType = res.headers.get("content-type");
+  if (!contentType || !contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(`Expected JSON, got: ${text.slice(0, 100)}`);
+  }
+  const data = await res.json();
+  console.log("Main process NLQ data:", data);
+  return data;
+});
+
+
 
