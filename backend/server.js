@@ -879,32 +879,154 @@ app.post('/api/inventory-controls', (req, res) => {
 // });
 
 // Analytics
-app.get('/api/analytics', (req, res) => {
-    db.get("SELECT COUNT(*) as totalOrders FROM orders", (err, row1) => {
-        if (err) {
-            logger.error(`DB error fetching analytics (totalOrders): ${err.message}`);
-            return res.status(500).json({ message: "DB error" });
-        }
-        db.get("SELECT COUNT(*) as pendingOrders FROM orders WHERE status='Pending'", (err, row2) => {
-            if (err) {
-                logger.error(`DB error fetching analytics (pendingOrders): ${err.message}`);
-                return res.status(500).json({ message: "DB error" });
-            }
-            db.get("SELECT SUM(stock) as totalStock FROM inventory", (err, row3) => {
-                if (err) {
-                    logger.error(`DB error fetching analytics (totalStock): ${err.message}`);
-                    return res.status(500).json({ message: "DB error" });
-                }
-                res.json({
-                    totalOrders: row1.totalOrders,
-                    pendingOrders: row2.pendingOrders,
-                    totalStock: row3.totalStock
+app.get('/api/ai/forecast/:productId', (req, res) => {
+    const productId = req.params.productId;
+    db.all(
+        `SELECT date(timestamp) as date, ABS(quantity) as quantity
+         FROM inventory_movements
+         WHERE product_id = ? AND movement_type = 'sale'
+         ORDER BY date ASC`,
+        [productId],
+        async (err, sales) => {
+            if (err) return res.status(500).json({ error: err.message });
+            // console.log("Sales data for AI:", sales);
+            try {
+                const fetchRes = await fetch('http://localhost:8000/forecast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sales_history: sales }),
                 });
-            });
-        });
-    });
+                if (!fetchRes.ok) throw new Error(`AI service error: ${fetchRes.status}`);
+                const data = await fetchRes.json();
+                res.json(data.forecast);
+            } catch (e) {
+                res.status(500).json({ error: e.message || "AI service error" });
+            }
+        }
+    );
 });
 
+app.get('/api/ai/anomaly/:productId', (req, res) => {
+    const productId = req.params.productId;
+    db.all(
+        `SELECT date(timestamp) as date, quantity
+         FROM inventory_movements
+         WHERE product_id = ?
+         ORDER BY date ASC`,
+        [productId],
+        async (err, movements) => {
+            if (err) return res.status(500).json({ error: err.message });
+            try {
+                const fetchRes = await fetch('http://localhost:8000/anomaly', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ inventory_movements: movements }),
+                });
+                if (!fetchRes.ok) throw new Error(`AI service error: ${fetchRes.status}`);
+                const data = await fetchRes.json();
+                res.json(data.anomalies);
+            } catch (e) {
+                res.status(500).json({ error: e.message || "AI service error" });
+            }
+        }
+    );
+});
+
+app.post('/api/ai/nlq', async (req, res) => {
+    const { productId } = req.body;
+    console.log("NLQ request for productId:", productId);
+
+    try {
+        // Inline Promises for DB queries
+        const getProduct = () =>
+            new Promise((resolve, reject) => {
+                db.get("SELECT * FROM products WHERE id = ?", [productId], (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+
+        const getSales = () =>
+            new Promise((resolve, reject) => {
+                db.all("SELECT * FROM inventory_movements WHERE product_id = ?", [productId], (err, rows) => {
+                    if (err) reject(err);
+                    else resolve(rows);
+                });
+            });
+
+        const getInventory = () =>
+            new Promise((resolve, reject) => {
+                db.get("SELECT * FROM inventory_controls WHERE product_id = ?", [productId], (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+
+        const [product, sales, inventory] = await Promise.all([
+            getProduct(),
+            getSales(),
+            getInventory()
+        ]);
+        // console.log("Fetched product data:", product);
+        const salesQuantity = Array.isArray(sales) ? (sales.filter(s => s.movement_type === 'sale').map(s => `${Math.abs(s.quantity)}`)) : 0;
+        const orderQuantity = Array.isArray(sales) ? (sales.filter(s => s.movement_type === 'procurement').map(s => `${Math.abs(s.quantity)}`)) : 0;
+        console.log("Sales quantity:", Number(salesQuantity[0]));
+        // Construct the prompt for the LLM
+        const prompt = `
+            Analyze this industrial product data and provide insights:
+
+            Product: ${product?.product_name || "N/A"} (SKU: ${product?.sku || "N/A"})
+            Current Stock: ${Number(orderQuantity[0]) - Number(salesQuantity[0])}
+            Unit Price: ${product?.unit_price || 0} in INR
+            Min Stock Level: ${inventory?.min_stock_level || 0}
+            Safety Stock: ${inventory?.safety_stock || 0}
+            Sales History: ${salesQuantity != 0 ? salesQuantity.join('\n') : ""}
+            Procurement History: ${orderQuantity != 0 ? orderQuantity.join('\n') : ""}
+
+            Provide concise insights and recommendations in bullet points.
+        `;
+        // Prepare fetch options
+        const fetchOptions = {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.HF_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                inputs: prompt,
+                parameters: {
+                    max_new_tokens: 500,
+                    temperature: 0.3
+                }
+            })
+        };
+
+        // Call HuggingFace Inference API with Fetch
+        const response = await fetch(
+            "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1",
+            fetchOptions
+        );
+        console.log("HF API response status:", response.status);
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HF API error: ${response.status} ${errorText}`);
+        }
+
+        const data = await response.json();
+        const aiResponse = data[0]?.generated_text || "No insight generated.";
+        const splitPrompt = "Provide concise insights and recommendations in bullet points.";
+        const promptIndex = aiResponse.indexOf(splitPrompt);
+        const afterPrompt = promptIndex !== -1
+            ? aiResponse.slice(promptIndex + splitPrompt.length)
+            : aiResponse;
+        console.log("AI response:", afterPrompt);
+        res.json({ insight: afterPrompt.trim() });
+
+    } catch (err) {
+        console.error('NLQ error:', err);
+        res.status(500).json({ error: "AI insight generation failed" });
+    }
+});
 app.get('/api/analytics/insights', (req, res) => {
     res.json([
         { message: "Stock of Bolt has been depleting 20% faster this quarter." },
