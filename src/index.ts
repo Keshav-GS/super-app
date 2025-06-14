@@ -159,12 +159,12 @@ ipcMain.handle('updateProduct', async (_event, id, product) => {
   return res.json();
 });
 
-// ipcMain.handle('deleteProduct', async (_event, id) => {
-//   const res = await fetch(`${API_BASE}/products/${id}`, {
-//     method: 'DELETE'
-//   });
-//   return res.json();
-// });
+ipcMain.handle('deleteProduct', async (_event, id) => {
+  const res = await fetch(`${API_BASE}/products/${id}`, {
+    method: 'DELETE'
+  });
+  return res.json();
+});
 
 ipcMain.handle('upload-products-csv', async (_event, fileData) => {
   const buffer = Buffer.from(fileData.buffer);
