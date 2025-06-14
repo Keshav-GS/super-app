@@ -970,20 +970,22 @@ app.post('/api/ai/nlq', async (req, res) => {
         // console.log("Fetched product data:", product);
         const salesQuantity = Array.isArray(sales) ? (sales.filter(s => s.movement_type === 'sale').map(s => `${Math.abs(s.quantity)}`)) : 0;
         const orderQuantity = Array.isArray(sales) ? (sales.filter(s => s.movement_type === 'procurement').map(s => `${Math.abs(s.quantity)}`)) : 0;
-        console.log("Sales quantity:", Number(salesQuantity[0]));
+        const currentStock = Number(orderQuantity[0]) - Number(salesQuantity[0]);
+        // console.log("Sales quantity:", Number(salesQuantity[0]));
         // Construct the prompt for the LLM
         const prompt = `
             Analyze this industrial product data and provide insights:
 
             Product: ${product?.product_name || "N/A"} (SKU: ${product?.sku || "N/A"})
-            Current Stock: ${Number(orderQuantity[0]) - Number(salesQuantity[0])}
+            Current Stock: ${currentStock || 0}
             Unit Price: ${product?.unit_price || 0} in INR
             Min Stock Level: ${inventory?.min_stock_level || 0}
             Safety Stock: ${inventory?.safety_stock || 0}
             Sales History: ${salesQuantity != 0 ? salesQuantity.join('\n') : ""}
             Procurement History: ${orderQuantity != 0 ? orderQuantity.join('\n') : ""}
 
-            Provide concise insights and recommendations in bullet points.
+            Provide concise insights and recommendations in bullet points(max 3-4 points) excluding explanation of my above data/
+            Do not repeat the data, just provide actionable insights.
         `;
         // Prepare fetch options
         const fetchOptions = {
@@ -1014,13 +1016,25 @@ app.post('/api/ai/nlq', async (req, res) => {
 
         const data = await response.json();
         const aiResponse = data[0]?.generated_text || "No insight generated.";
-        const splitPrompt = "Provide concise insights and recommendations in bullet points.";
+        const splitPrompt = "Do not repeat the data, just provide actionable insights.";
         const promptIndex = aiResponse.indexOf(splitPrompt);
         const afterPrompt = promptIndex !== -1
             ? aiResponse.slice(promptIndex + splitPrompt.length)
             : aiResponse;
-        console.log("AI response:", afterPrompt);
-        res.json({ insight: afterPrompt.trim() });
+        //console.log("AI response:", afterPrompt);
+        res.json({
+            insight: afterPrompt.trim(),
+            metrics: {
+                current_stock: currentStock || 0,
+                unit_price: product?.unit_price || 0,
+                min_stock: inventory?.min_stock_level || 0,
+                safety_stock: inventory?.safety_stock || 0,
+                sales_history: salesQuantity.length > 0 ? salesQuantity : [0],
+                procurement_history: orderQuantity.length > 0 ? orderQuantity : [0],
+                sales_total: Number(salesQuantity[0]) || 0,
+                procurement_total: Number(orderQuantity[0]) || 0
+            }
+        });
 
     } catch (err) {
         console.error('NLQ error:', err);
