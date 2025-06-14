@@ -21,7 +21,7 @@ def forecast(data: ForecastRequest):
     forecast = m.predict(future)
     result = [
         {"date": row["ds"].strftime("%Y-%m-%d"), "forecast": float(row["yhat"])}
-        for _, row in forecast.tail(30).iterrows()
+        for _, row in forecast.tail(10).iterrows()
     ]
     return {"forecast": result}
 
